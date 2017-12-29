@@ -1,28 +1,44 @@
 from CTFd.plugins import register_plugin_assets_directory
 from CTFd.plugins.keys import get_key_class
+from CTFd.plugins.challenges import BaseChallenge, CHALLENGE_CLASSES
 from CTFd.models import db, Solves, WrongKeys, Keys, Challenges, Files, Tags
 from CTFd import utils
+from os import path
+from io import BytesIO
+import urllib.parse
+from urllib.request import urlopen
+from urllib.error import HTTPError
+from flask import session, abort, send_file
+from .config import registrar_host, registrar_port
+import json
 
+plugin_dirname = path.basename(path.dirname(__file__))
 
-class BaseChallenge(object):
-    id = None
-    name = None
-    templates = {}
-    scripts = {}
+class NaumachiaChallengeModel(Challenges):
+    __mapper_args__ = {'polymorphic_identity': 'naumachia'}
+    id = db.Column(None, db.ForeignKey('challenges.id'), primary_key=True)
+    naumachia_name = db.Column(db.String(80))
 
+    def __init__(self, name, description, value, category, naumachia_name, type='naumachia'):
+        self.name = name
+        self.description = description
+        self.value = value
+        self.category = category
+        self.type = type
+        self.naumachia_name = naumachia_name
 
-class CTFdStandardChallenge(BaseChallenge):
-    id = "standard"  # Unique identifier used to register challenges
-    name = "standard"  # Name of a challenge type
+class NaumachiaChallenge(BaseChallenge):
+    id = "naumachia"  # Unique identifier used to register challenges
+    name = "naumachia"  # Name of a challenge type
     templates = {  # Nunjucks templates used for each aspect of challenge editing & viewing
-        'create': '/plugins/challenges/assets/standard-challenge-create.njk',
-        'update': '/plugins/challenges/assets/standard-challenge-update.njk',
-        'modal': '/plugins/challenges/assets/standard-challenge-modal.njk',
+        'create': '/plugins/{0}/assets/naumachia-challenge-create.njk'.format(plugin_dirname),
+        'update': '/plugins/{0}/assets/naumachia-challenge-update.njk'.format(plugin_dirname),
+        'modal': '/plugins/{0}/assets/naumachia-challenge-modal.njk'.format(plugin_dirname),
     }
     scripts = {  # Scripts that are loaded when a template is loaded
-        'create': '/plugins/challenges/assets/standard-challenge-create.js',
-        'update': '/plugins/challenges/assets/standard-challenge-update.js',
-        'modal': '/plugins/challenges/assets/standard-challenge-modal.js',
+        'create': '/plugins/{0}/assets/naumachia-challenge-create.js'.format(plugin_dirname),
+        'update': '/plugins/{0}/assets/naumachia-challenge-update.js'.format(plugin_dirname),
+        'modal': '/plugins/{0}/assets/naumachia-challenge-modal.js'.format(plugin_dirname),
     }
 
     @staticmethod
@@ -33,13 +49,15 @@ class CTFdStandardChallenge(BaseChallenge):
         :param request:
         :return:
         """
+
         # Create challenge
-        chal = Challenges(
+        chal = NaumachiaChallengeModel(
             name=request.form['name'],
             description=request.form['description'],
             value=request.form['value'],
             category=request.form['category'],
-            type=request.form['chaltype']
+            type=request.form['chaltype'],
+            naumachia_name=request.form['naumachia_name']
         )
 
         if 'hidden' in request.form:
@@ -81,14 +99,15 @@ class CTFdStandardChallenge(BaseChallenge):
             'value': challenge.value,
             'description': challenge.description,
             'category': challenge.category,
+            'naumachia_name': challenge.naumachia_name,
             'hidden': challenge.hidden,
             'max_attempts': challenge.max_attempts,
             'type': challenge.type,
             'type_data': {
-                'id': CTFdStandardChallenge.id,
-                'name': CTFdStandardChallenge.name,
-                'templates': CTFdStandardChallenge.templates,
-                'scripts': CTFdStandardChallenge.scripts,
+                'id': NaumachiaChallenge.id,
+                'name': NaumachiaChallenge.name,
+                'templates': NaumachiaChallenge.templates,
+                'scripts': NaumachiaChallenge.scripts,
             }
         }
         return challenge, data
@@ -108,6 +127,7 @@ class CTFdStandardChallenge(BaseChallenge):
         challenge.value = int(request.form.get('value', 0)) if request.form.get('value', 0) else 0
         challenge.max_attempts = int(request.form.get('max_attempts', 0)) if request.form.get('max_attempts', 0) else 0
         challenge.category = request.form['category']
+        challenge.naumachia_name = request.form['naumachia_name']
         challenge.hidden = 'hidden' in request.form
         db.session.commit()
         db.session.close()
@@ -128,6 +148,7 @@ class CTFdStandardChallenge(BaseChallenge):
             utils.delete_file(f.id)
         Files.query.filter_by(chal=challenge.id).delete()
         Tags.query.filter_by(chal=challenge.id).delete()
+        NaumachiaChallengeModel.query.filter_by(id=challenge.id).delete()
         Challenges.query.filter_by(id=challenge.id).delete()
         db.session.commit()
 
@@ -181,28 +202,51 @@ class CTFdStandardChallenge(BaseChallenge):
         db.session.commit()
         db.session.close()
 
+def user_can_get_config():
+    if utils.is_admin():
+        return True
+    if not (utils.authed() and utils.is_verified()):
+        return False
+    if not utils.user_can_view_challenges():
+        return False
+    if not (utils.ctf_started() and (utils.ctf_ended() or utils.view_after_ctf())):
+        return False
+    return True
 
-def get_chal_class(class_id):
-    """
-    Utility function used to get the corresponding class from a class ID.
-
-    :param class_id: String representing the class ID
-    :return: Challenge class
-    """
-    cls = CHALLENGE_CLASSES.get(class_id)
-    if cls is None:
-        raise KeyError
-    return cls
-
-
-"""
-Global dictionary used to hold all the Challenge Type classes used by CTFd. Insert into this dictionary to register
-your Challenge Type.
-"""
-CHALLENGE_CLASSES = {
-    "standard": CTFdStandardChallenge
-}
-
+def send_config(host, escaped_chalname, escaped_username):
+    resp = urlopen("http://{0}/{1}/get?cn={2}".format(host, escaped_chalname, escaped_username))
+    config = json.loads(resp.read().decode('utf-8')).encode('utf-8')
+    return send_file(
+        BytesIO(config),
+        attachment_filename="{0}.ovpn".format(escaped_chalname),
+        as_attachment=True
+    )
 
 def load(app):
-    register_plugin_assets_directory(app, base_path='/plugins/challenges/assets/')
+    app.db.create_all()
+    CHALLENGE_CLASSES['naumachia'] = NaumachiaChallenge
+
+    @app.route('/naumachia/config/<int:chalid>', methods=['GET'])
+    def registrar(chalid):
+        if user_can_get_config():
+            chal = NaumachiaChallengeModel.query.filter_by(id=chalid).first_or_404()
+            if chal.hidden:
+                abort(404)
+            
+            escaped_username = urllib.parse.quote(session['username'])
+            escaped_chalname = urllib.parse.quote(chal.naumachia_name, safe='')
+            host = "{0}:{1}".format(registrar_host, registrar_port)
+
+            try:
+                return send_config(host, escaped_chalname, escaped_username)
+            except HTTPError as err:
+                if not err.code == 404:
+                    raise
+
+                # The certs had not been generated yet. Generate them now
+                urlopen("http://{0}/{1}/add?cn={2}".format(host, escaped_chalname, escaped_username))
+                return send_config(host, escaped_chalname, escaped_username)
+        else:
+            abort(403)
+    
+    register_plugin_assets_directory(app, base_path='/plugins/{0}/assets/'.format(plugin_dirname))

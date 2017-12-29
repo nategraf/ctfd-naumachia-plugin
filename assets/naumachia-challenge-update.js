@@ -58,6 +58,7 @@ function loadchal(id, update) {
             $('#chal-attempts-group').show();
         }
         $('.chal-category').val(obj.category);
+        $('.chal-naumachia-name').val(obj.naumachia_name);
         $('.chal-id').val(obj.id);
         $('.chal-hidden').prop('checked', false);
         if (obj.hidden) {
