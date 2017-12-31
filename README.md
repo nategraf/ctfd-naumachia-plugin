@@ -1,5 +1,5 @@
 # CTFd Naumachia Plugin
-Plugin for CTFd to integrate with [Naumachia](https://github.com/nategraf/Naumachia)
+Plugin for [CTFd](https://github.com/ctfd/ctfd) to integrate with [Naumachia](https://github.com/nategraf/Naumachia)
 
 This plugin crestes the utilities needed to manage Naumachia user configs and certs from the CTFd interface.
 
