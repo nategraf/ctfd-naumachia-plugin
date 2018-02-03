@@ -11,8 +11,11 @@ from urllib.error import HTTPError
 from flask import session, abort, send_file
 from .config import registrar_host, registrar_port
 import json
+import logging
+import os
 
 plugin_dirname = path.basename(path.dirname(__file__))
+logger = logging.getLogger('naumachia')
 
 class NaumachiaChallengeModel(Challenges):
     __mapper_args__ = {'polymorphic_identity': 'naumachia'}
@@ -214,7 +217,9 @@ def user_can_get_config():
     return True
 
 def send_config(host, escaped_chalname, escaped_username):
-    resp = urlopen("http://{0}/{1}/get?cn={2}".format(host, escaped_chalname, escaped_username))
+    url = "http://{0}/{1}/get?cn={2}".format(host, escaped_chalname, escaped_username)
+    logger.debug("Requesting: {0}".format(url))
+    resp = urlopen(url, timeout=10)
     config = json.loads(resp.read().decode('utf-8')).encode('utf-8')
     return send_file(
         BytesIO(config),
@@ -226,11 +231,28 @@ def load(app):
     app.db.create_all()
     CHALLENGE_CLASSES['naumachia'] = NaumachiaChallenge
 
+    # Create logger
+    logger.setLevel(logging.INIT)
+
+    log_dir = app.config['LOG_FOLDER']
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    log_file = os.path.join(log_dir, 'naumachia.log')
+
+    if not os.path.exists(log_file):
+        open(log_file, 'a').close()
+
+    handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=10000)
+    logger.addHandler(handler)
+    logger.propagate = 0
+
     @app.route('/naumachia/config/<int:chalid>', methods=['GET'])
     def registrar(chalid):
         if user_can_get_config():
             chal = NaumachiaChallengeModel.query.filter_by(id=chalid).first_or_404()
             if chal.hidden:
+                logger.info("[404] User {0} requested config for hidden challenge {1}".format(session['username'], chal.name))
                 abort(404)
             
             escaped_username = urllib.parse.quote(session['username'])
@@ -238,15 +260,28 @@ def load(app):
             host = "{0}:{1}".format(registrar_host, registrar_port)
 
             try:
-                return send_config(host, escaped_chalname, escaped_username)
+                resp = send_config(host, escaped_chalname, escaped_username)
+                logger.info("[200] User {0} requested config for challenge {1}".format(session['username'], chal.name))
+                return resp
             except HTTPError as err:
-                if not err.code == 404:
+                if err.code != 404:
+                    logger.info("[500] Config retrival failed for challenge {1}".format(chal.name))
                     raise
 
-                # The certs had not been generated yet. Generate them now
-                urlopen("http://{0}/{1}/add?cn={2}".format(host, escaped_chalname, escaped_username))
-                return send_config(host, escaped_chalname, escaped_username)
+                try:
+                    # The certs had not been generated yet. Generate them now
+                    url = "http://{0}/{1}/add?cn={2}".format(host, escaped_chalname, escaped_username)
+                    logger.debug("Requesting: {0}".format(url))
+                    urlopen(url, timeout=10)
+
+                    resp = send_config(host, escaped_chalname, escaped_username)
+                    logger.info("[200] User {0} requested new config for challenge {1}".format(session['username'], chal.name))
+                    return resp
+                except HTTPError:
+                    logger.info("[500] Config creation failed for challenge {1}".format(chal.name))
+                    raise
         else:
+            logger.info("[403] User {0} requested config for challenge {1}: Not authorized".format(session['username'], chalid))
             abort(403)
     
     register_plugin_assets_directory(app, base_path='/plugins/{0}/assets/'.format(plugin_dirname))
