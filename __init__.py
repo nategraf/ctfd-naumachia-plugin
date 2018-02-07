@@ -234,7 +234,7 @@ def load(app):
     # Create logger
     logger.setLevel(logging.INIT)
 
-    log_dir = app.config['LOG_FOLDER']
+    log_dir = app.config.get('LOG_FOLDER', path.join(path.dirname(__file__), 'logs'))
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
