@@ -5,14 +5,21 @@ from CTFd.models import db, Solves, WrongKeys, Keys, Challenges, Files, Tags
 from CTFd import utils
 from os import path
 from io import BytesIO
-import urllib.parse
-from urllib.request import urlopen
-from urllib.error import HTTPError
 from flask import session, abort, send_file
 from .config import registrar_host, registrar_port
 import json
 import logging
 import os
+
+try:
+    from urllib.parse import urlparse
+    from urllib.request import urlopen
+    from urllib.error import HTTPError
+except ImportError:
+    from urlparse import urlparse
+    from urllib2 import urlopen
+    from urllib2 import HTTPError
+
 
 plugin_dirname = path.basename(path.dirname(__file__))
 logger = logging.getLogger('naumachia')
@@ -232,7 +239,7 @@ def load(app):
     CHALLENGE_CLASSES['naumachia'] = NaumachiaChallenge
 
     # Create logger
-    logger.setLevel(logging.INIT)
+    logger.setLevel(logging.INFO)
 
     log_dir = app.config.get('LOG_FOLDER', path.join(path.dirname(__file__), 'logs'))
     if not os.path.exists(log_dir):
@@ -255,8 +262,8 @@ def load(app):
                 logger.info("[404] User {0} requested config for hidden challenge {1}".format(session['username'], chal.name))
                 abort(404)
             
-            escaped_username = urllib.parse.quote(session['username'])
-            escaped_chalname = urllib.parse.quote(chal.naumachia_name, safe='')
+            escaped_username = urlparse.quote(session['username'])
+            escaped_chalname = urlparse.quote(chal.naumachia_name, safe='')
             host = "{0}:{1}".format(registrar_host, registrar_port)
 
             try:
