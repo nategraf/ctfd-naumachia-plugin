@@ -34,9 +34,9 @@ class NaumachiaChallenge(BaseChallenge):
     id = "naumachia"  # Unique identifier used to register challenges
     name = "naumachia"  # Name of a challenge type
     templates = {  # Nunjucks templates used for each aspect of challenge editing & viewing
-        'create': '/plugins/{0}/assets/naumachia-challenge-create.njk'.format(plugin_dirname),
-        'update': '/plugins/{0}/assets/naumachia-challenge-update.njk'.format(plugin_dirname),
-        'modal': '/plugins/{0}/assets/naumachia-challenge-modal.njk'.format(plugin_dirname),
+        'create': '/plugins/{0}/assets/naumachia-challenge-create.hbs'.format(plugin_dirname),
+        'update': '/plugins/{0}/assets/naumachia-challenge-update.hbs'.format(plugin_dirname),
+        'modal': '/plugins/{0}/assets/naumachia-challenge-modal.hbs'.format(plugin_dirname),
     }
     scripts = {  # Scripts that are loaded when a template is loaded
         'create': '/plugins/{0}/assets/naumachia-challenge-create.js'.format(plugin_dirname),
@@ -52,11 +52,10 @@ class NaumachiaChallenge(BaseChallenge):
         :param request:
         :return:
         """
-
         # Create challenge
         chal = NaumachiaChallengeModel(
             name=request.form['name'],
-            description=request.form['description'],
+            description=request.form['desc'],
             value=request.form['value'],
             category=request.form['category'],
             type=request.form['chaltype'],
@@ -126,7 +125,7 @@ class NaumachiaChallenge(BaseChallenge):
         :return:
         """
         challenge.name = request.form['name']
-        challenge.description = request.form['description']
+        challenge.description = request.form['desc']
         challenge.value = int(request.form.get('value', 0)) if request.form.get('value', 0) else 0
         challenge.max_attempts = int(request.form.get('max_attempts', 0)) if request.form.get('max_attempts', 0) else 0
         challenge.category = request.form['category']
@@ -232,7 +231,7 @@ def load(app):
     CHALLENGE_CLASSES['naumachia'] = NaumachiaChallenge
 
     # Create logger
-    logger.setLevel(logging.INIT)
+    logger.setLevel(logging.INFO)
 
     log_dir = app.config.get('LOG_FOLDER', path.join(path.dirname(__file__), 'logs'))
     if not os.path.exists(log_dir):
@@ -265,7 +264,7 @@ def load(app):
                 return resp
             except HTTPError as err:
                 if err.code != 404:
-                    logger.info("[500] Config retrival failed for challenge {1}".format(chal.name))
+                    logger.info("[500] Config retrival failed for challenge {0}".format(chal.name))
                     raise
 
                 try:
@@ -278,7 +277,7 @@ def load(app):
                     logger.info("[200] User {0} requested new config for challenge {1}".format(session['username'], chal.name))
                     return resp
                 except HTTPError:
-                    logger.info("[500] Config creation failed for challenge {1}".format(chal.name))
+                    logger.info("[500] Config creation failed for challenge {0}".format(chal.name))
                     raise
         else:
             logger.info("[403] User {0} requested config for challenge {1}: Not authorized".format(session['username'], chalid))
