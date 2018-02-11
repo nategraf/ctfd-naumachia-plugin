@@ -208,11 +208,9 @@ class NaumachiaChallenge(BaseChallenge):
 def user_can_get_config():
     if utils.is_admin():
         return True
-    if not (utils.authed() and utils.is_verified()):
+    if not utils.authed():
         return False
     if not utils.user_can_view_challenges():
-        return False
-    if not (utils.ctf_started() and (utils.ctf_ended() or utils.view_after_ctf())):
         return False
     return True
 
