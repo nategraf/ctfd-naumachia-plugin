@@ -283,7 +283,7 @@ def load(app):
                     logger.info("[500] Config creation failed for challenge {0}".format(chal.name))
                     raise
         else:
-            logger.info("[403] User {0} requested config for challenge {1}: Not authorized".format(session['username'], chalid))
+            logger.info("[403] User {0} requested config for challenge {1}: Not authorized".format(session.get('username', '<not authed>'), chalid))
             abort(403)
     
     register_plugin_assets_directory(app, base_path='/plugins/{0}/assets/'.format(plugin_dirname))
