@@ -268,7 +268,7 @@ def load(app):
                 return resp
             except HTTPError as err:
                 if err.code != 404:
-                    logger.info("[500] Config retrival failed for challenge {1}".format(chal.name))
+                    logger.info("[500] Config retrival failed for challenge {0}".format(chal.name))
                     raise
 
                 try:
@@ -281,7 +281,7 @@ def load(app):
                     logger.info("[200] User {0} requested new config for challenge {1}".format(session['username'], chal.name))
                     return resp
                 except HTTPError:
-                    logger.info("[500] Config creation failed for challenge {1}".format(chal.name))
+                    logger.info("[500] Config creation failed for challenge {0}".format(chal.name))
                     raise
         else:
             logger.info("[403] User {0} requested config for challenge {1}: Not authorized".format(session.get('username', '<not authed>'), chalid))
