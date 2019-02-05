@@ -1,9 +1,8 @@
 from CTFd.plugins import register_plugin_assets_directory
 from CTFd.plugins.keys import get_key_class
 from CTFd.plugins.challenges import BaseChallenge, CHALLENGE_CLASSES
-from CTFd.models import db, Solves, WrongKeys, Keys, Challenges, Files, Tags
+from CTFd.models import db, Solves, WrongKeys, Keys, Challenges, Files, Tags, Hints
 from CTFd import utils
-from os import path
 from io import BytesIO
 from flask import session, abort, send_file
 from .config import registrar_host, registrar_port
@@ -19,8 +18,9 @@ except ImportError:
     from urllib import quote
     from urllib2 import urlopen, HTTPError
 
-plugin_dirname = path.basename(path.dirname(__file__))
+plugin_dirname = os.path.basename(os.path.dirname(__file__))
 logger = logging.getLogger('naumachia')
+registrar_timeout = 10
 
 class NaumachiaChallengeModel(Challenges):
     __mapper_args__ = {'polymorphic_identity': 'naumachia'}
@@ -156,6 +156,7 @@ class NaumachiaChallenge(BaseChallenge):
             utils.delete_file(f.id)
         Files.query.filter_by(chal=challenge.id).delete()
         Tags.query.filter_by(chal=challenge.id).delete()
+        Hints.query.filter_by(chal=challenge.id).delete()
         NaumachiaChallengeModel.query.filter_by(id=challenge.id).delete()
         Challenges.query.filter_by(id=challenge.id).delete()
         db.session.commit()
@@ -174,7 +175,7 @@ class NaumachiaChallenge(BaseChallenge):
         provided_key = request.form['key'].strip()
         chal_keys = Keys.query.filter_by(chal=chal.id).all()
         for chal_key in chal_keys:
-            if get_key_class(chal_key.type).compare(chal_key.flag, provided_key):
+            if get_key_class(chal_key.type).compare(chal_key, provided_key):
                 return True, 'Correct'
         return False, 'Incorrect'
 
@@ -222,7 +223,7 @@ def user_can_get_config():
 def send_config(host, escaped_chalname, escaped_username):
     url = "http://{0}/{1}/get?cn={2}".format(host, escaped_chalname, escaped_username)
     logger.debug("Requesting: {0}".format(url))
-    resp = urlopen(url, timeout=10)
+    resp = urlopen(url, timeout=registrar_timeout)
     config = json.loads(resp.read().decode('utf-8')).encode('utf-8')
     return send_file(
         BytesIO(config),
@@ -234,10 +235,10 @@ def load(app):
     app.db.create_all()
     CHALLENGE_CLASSES['naumachia'] = NaumachiaChallenge
 
-    # Create logger
+    # Intitialize logging.
     logger.setLevel(logging.INFO)
 
-    log_dir = app.config.get('LOG_FOLDER', path.join(path.dirname(__file__), 'logs'))
+    log_dir = app.config.get('LOG_FOLDER', os.path.join(os.path.dirname(__file__), 'logs'))
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
@@ -252,39 +253,39 @@ def load(app):
 
     @app.route('/naumachia/config/<int:chalid>', methods=['GET'])
     def registrar(chalid):
-        if user_can_get_config():
-            chal = NaumachiaChallengeModel.query.filter_by(id=chalid).first_or_404()
-            if chal.hidden:
-                logger.info("[404] User {0} requested config for hidden challenge {1}".format(session['username'], chal.name))
-                abort(404)
-            
-            escaped_username = quote(session['username'])
-            escaped_chalname = quote(chal.naumachia_name, safe='')
-            host = "{0}:{1}".format(registrar_host, registrar_port)
-
-            try:
-                resp = send_config(host, escaped_chalname, escaped_username)
-                logger.info("[200] User {0} requested config for challenge {1}".format(session['username'], chal.name))
-                return resp
-            except HTTPError as err:
-                if err.code != 404:
-                    logger.info("[500] Config retrival failed for challenge {0}".format(chal.name))
-                    raise
-
-                try:
-                    # The certs had not been generated yet. Generate them now
-                    url = "http://{0}/{1}/add?cn={2}".format(host, escaped_chalname, escaped_username)
-                    logger.debug("Requesting: {0}".format(url))
-                    urlopen(url, timeout=10)
-
-                    resp = send_config(host, escaped_chalname, escaped_username)
-                    logger.info("[200] User {0} requested new config for challenge {1}".format(session['username'], chal.name))
-                    return resp
-                except HTTPError:
-                    logger.info("[500] Config creation failed for challenge {0}".format(chal.name))
-                    raise
-        else:
+        if not user_can_get_config():
             logger.info("[403] User {0} requested config for challenge {1}: Not authorized".format(session.get('username', '<not authed>'), chalid))
             abort(403)
+
+        chal = NaumachiaChallengeModel.query.filter_by(id=chalid).first_or_404()
+        if chal.hidden:
+            logger.info("[404] User {0} requested config for hidden challenge {1}".format(session['username'], chal.name))
+            abort(404)
+
+        escaped_username = quote(session['username'])
+        escaped_chalname = quote(chal.naumachia_name, safe='')
+        host = "{0}:{1}".format(registrar_host, registrar_port)
+
+        try:
+            resp = send_config(host, escaped_chalname, escaped_username)
+            logger.info("[200] User {0} requested config for challenge {1}".format(session['username'], chal.name))
+            return resp
+        except HTTPError as err:
+            if err.code != 404:
+                logger.info("[500] Config retrival failed for challenge {0}".format(chal.name))
+                raise
+
+        try:
+            # The certs had not been generated yet. Generate them now
+            url = "http://{0}/{1}/add?cn={2}".format(host, escaped_chalname, escaped_username)
+            logger.debug("Requesting: {0}".format(url))
+            urlopen(url, timeout=registrar_timeout)
+
+            resp = send_config(host, escaped_chalname, escaped_username)
+            logger.info("[200] User {0} requested new config for challenge {1}".format(session['username'], chal.name))
+            return resp
+        except HTTPError:
+            logger.info("[500] Config creation failed for challenge {0}".format(chal.name))
+            raise
     
     register_plugin_assets_directory(app, base_path='/plugins/{0}/assets/'.format(plugin_dirname))
