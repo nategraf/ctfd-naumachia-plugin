@@ -1,11 +1,13 @@
-from CTFd.plugins import register_plugin_assets_directory
-from CTFd.plugins.keys import get_key_class
-from CTFd.plugins.challenges import BaseChallenge, CHALLENGE_CLASSES
-from CTFd.models import db, Solves, WrongKeys, Keys, Challenges, Files, Tags, Hints
-from CTFd import utils
-from io import BytesIO
-from flask import session, abort, send_file
+from __future__ import division # Use floating point for math calculations
 from .config import registrar_host, registrar_port
+from CTFd import utils
+from CTFd.models import db, Solves, WrongKeys, Keys, Challenges, Files, Tags, Teams, Hints
+from CTFd.plugins import register_plugin_assets_directory
+from CTFd.plugins.challenges import BaseChallenge, CHALLENGE_CLASSES
+from CTFd.plugins.keys import get_key_class
+from flask import session, abort, send_file
+from io import BytesIO
+import math
 import json
 import logging
 import os
@@ -26,14 +28,20 @@ class NaumachiaChallengeModel(Challenges):
     __mapper_args__ = {'polymorphic_identity': 'naumachia'}
     id = db.Column(None, db.ForeignKey('challenges.id'), primary_key=True)
     naumachia_name = db.Column(db.String(80))
+    initial = db.Column(db.Integer)
+    minimum = db.Column(db.Integer)
+    decay = db.Column(db.Integer)
 
-    def __init__(self, name, description, value, category, naumachia_name, type='naumachia'):
+    def __init__(self, name, description, value, category, naumachia_name, type='naumachia', minimum=1, decay=50):
         self.name = name
         self.description = description
         self.value = value
         self.category = category
         self.type = type
         self.naumachia_name = naumachia_name
+        self.initial = value
+        self.minimum = minimum
+        self.decay = decay
 
 class NaumachiaChallenge(BaseChallenge):
     id = "naumachia"  # Unique identifier used to register challenges
@@ -57,7 +65,6 @@ class NaumachiaChallenge(BaseChallenge):
         :param request:
         :return:
         """
-
         # Create challenge
         chal = NaumachiaChallengeModel(
             name=request.form['name'],
@@ -65,7 +72,9 @@ class NaumachiaChallenge(BaseChallenge):
             value=request.form['value'],
             category=request.form['category'],
             type=request.form['chaltype'],
-            naumachia_name=request.form['naumachia_name']
+            naumachia_name=request.form['naumachia_name'],
+            minimum=request.form['minimum'],
+            decay=request.form['decay']
         )
 
         if 'hidden' in request.form:
@@ -101,10 +110,14 @@ class NaumachiaChallenge(BaseChallenge):
         :param challenge:
         :return: Challenge object, data dictionary to be returned to the user
         """
+        challenge = NaumachiaChallengeModel.query.filter_by(id=challenge.id).first()
         data = {
             'id': challenge.id,
             'name': challenge.name,
             'value': challenge.value,
+            'initial': challenge.initial,
+            'decay': challenge.decay,
+            'minimum': challenge.minimum,
             'description': challenge.description,
             'category': challenge.category,
             'naumachia_name': challenge.naumachia_name,
@@ -130,6 +143,8 @@ class NaumachiaChallenge(BaseChallenge):
         :param request:
         :return:
         """
+        challenge = NaumachiaChallengeModel.query.filter_by(id=challenge.id).first()
+
         challenge.name = request.form['name']
         challenge.description = request.form['description']
         challenge.value = int(request.form.get('value', 0)) if request.form.get('value', 0) else 0
@@ -137,6 +152,11 @@ class NaumachiaChallenge(BaseChallenge):
         challenge.category = request.form['category']
         challenge.naumachia_name = request.form['naumachia_name']
         challenge.hidden = 'hidden' in request.form
+
+        challenge.initial = request.form['initial']
+        challenge.minimum = request.form['minimum']
+        challenge.decay = request.form['decay']
+
         db.session.commit()
         db.session.close()
 
@@ -189,9 +209,29 @@ class NaumachiaChallenge(BaseChallenge):
         :param request: The request the user submitted
         :return:
         """
+        chal = NaumachiaChallengeModel.query.filter_by(id=chal.id).first()
+
+        solve_count = Solves.query.join(Teams, Solves.teamid == Teams.id).filter(Solves.chalid==chal.id, Teams.banned==False).count()
+
+        # It is important that this calculation takes into account floats.
+        # Hence this file uses from __future__ import division
+        value = (
+                    (
+                        (chal.minimum - chal.initial)/(chal.decay**2)
+                    ) * (solve_count**2)
+                ) + chal.initial
+
+        value = math.ceil(value)
+
+        if value < chal.minimum:
+            value = chal.minimum
+
+        chal.value = value
+
         provided_key = request.form['key'].strip()
         solve = Solves(teamid=team.id, chalid=chal.id, ip=utils.get_ip(req=request), flag=provided_key)
         db.session.add(solve)
+
         db.session.commit()
         db.session.close()
 
