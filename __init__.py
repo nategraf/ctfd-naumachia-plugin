@@ -294,7 +294,7 @@ def load(app):
     @app.route('/naumachia/config/<int:chalid>', methods=['GET'])
     def registrar(chalid):
         if not user_can_get_config():
-            logger.info("[403] User %s requested config for challenge %s: Not authorized", session.get('username', '<not authed>'), chalid))
+            logger.info("[403] User %s requested config for challenge %s: Not authorized", session.get('username', '<not authed>'), chalid)
             abort(403)
 
         chal = NaumachiaChallengeModel.query.filter_by(id=chalid).first_or_404()
@@ -312,7 +312,7 @@ def load(app):
             return resp
         except HTTPError as err:
             if err.code != 404:
-                logger.error("[500] Config retrival failed for challenge %s [%s]: %r", chal.name, chal.naumachia_name, err)
+                logger.error("[500] Config retrival failed for challenge %s [%s]: %s", chal.name, chal.naumachia_name, err)
                 raise
 
         try:
@@ -325,7 +325,7 @@ def load(app):
             logger.info("[200] User %s requested new config for challenge %s [%s]", session['username'], chal.name, chal.naumachia_name)
             return resp
         except HTTPError as err:
-            logger.info("[500] Config creation failed for challenge %s [%s]: %r", chal.name, chal.naumachia_name, err)
+            logger.error("[500] Config creation failed for challenge %s [%s]: %s", chal.name, chal.naumachia_name, err)
             raise
     
     register_plugin_assets_directory(app, base_path='/plugins/{0}/assets/'.format(plugin_dirname))
