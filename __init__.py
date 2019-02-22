@@ -294,12 +294,12 @@ def load(app):
     @app.route('/naumachia/config/<int:chalid>', methods=['GET'])
     def registrar(chalid):
         if not user_can_get_config():
-            logger.info("[403] User {0} requested config for challenge {1}: Not authorized".format(session.get('username', '<not authed>'), chalid))
+            logger.info("[403] User %s requested config for challenge %s: Not authorized", session.get('username', '<not authed>'), chalid))
             abort(403)
 
         chal = NaumachiaChallengeModel.query.filter_by(id=chalid).first_or_404()
         if chal.hidden:
-            logger.info("[404] User {0} requested config for hidden challenge {1}".format(session['username'], chal.name))
+            logger.info("[404] User %s requested config for hidden challenge %s [%s]", session['username'], chal.name, chal.naumachia_name)
             abort(404)
 
         escaped_username = quote(session['username'])
@@ -308,11 +308,11 @@ def load(app):
 
         try:
             resp = send_config(host, escaped_chalname, escaped_username)
-            logger.info("[200] User {0} requested config for challenge {1}".format(session['username'], chal.name))
+            logger.info("[200] User %s requested config for challenge %s [%s]", session['username'], chal.name, chal.naumachia_name)
             return resp
         except HTTPError as err:
             if err.code != 404:
-                logger.info("[500] Config retrival failed for challenge {0}".format(chal.name))
+                logger.error("[500] Config retrival failed for challenge %s [%s]: %r", chal.name, chal.naumachia_name, err)
                 raise
 
         try:
@@ -322,10 +322,10 @@ def load(app):
             urlopen(url, timeout=registrar_timeout)
 
             resp = send_config(host, escaped_chalname, escaped_username)
-            logger.info("[200] User {0} requested new config for challenge {1}".format(session['username'], chal.name))
+            logger.info("[200] User %s requested new config for challenge %s [%s]", session['username'], chal.name, chal.naumachia_name)
             return resp
-        except HTTPError:
-            logger.info("[500] Config creation failed for challenge {0}".format(chal.name))
+        except HTTPError as err:
+            logger.info("[500] Config creation failed for challenge %s [%s]: %r", chal.name, chal.naumachia_name, err)
             raise
     
     register_plugin_assets_directory(app, base_path='/plugins/{0}/assets/'.format(plugin_dirname))
