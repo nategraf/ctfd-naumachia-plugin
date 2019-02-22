@@ -1,43 +1,44 @@
 <div id="update-challenge" class="modal fade" tabindex="-1">
-	<div class="modal-dialog">
-		<div class="modal-content">
-			<div class="modal-header">
-				<div class="container">
-					<div class="row">
-						<div class="col-md-12">
-							<h3 class="chal-title text-center">{{ name }}</h3>
-						</div>
-					</div>
-				</div>
-				<button type="button" class="close" data-dismiss="modal" aria-label="Close">
-					<span aria-hidden="true">&times;</span>
-				</button>
-			</div>
-			<div class="modal-body">
-				<form method="POST" action="{{ script_root }}/admin/chal/update">
-					<input name='nonce' type='hidden' value="{{ nonce }}">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="container">
+                    <div class="row">
+                        <div class="col-md-12">
+                            <h3 class="chal-title text-center">{{ name }}</h3>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                  <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form method="POST" action="{{ script_root }}/admin/chal/update">
+                    <input name='nonce' type='hidden' value="{{ nonce }}">
 
-					<div class="form-group">
-						<label for="name">Name
-							<i class="far fa-question-circle text-muted cursor-help" data-toggle="tooltip"
-							   data-placement="right" title="The name of your challenge"></i>
-						</label>
-						<input type="text" class="form-control chal-name" name="name" placeholder="Enter challenge name"
-							   value="{{ name }}">
-					</div>
-					<div class="form-group">
-						<label for="category">Category
-							<i class="far fa-question-circle text-muted cursor-help" data-toggle="tooltip"
-							   data-placement="right" title="The category of your challenge"></i>
-						</label>
-						<input type="text" class="form-control chal-category" name="category"
-							   placeholder="Enter challenge category" value="{{ category }}">
-					</div>
+                    <div class="form-group">
+                        <label for="name">Name
+                            <i class="far fa-question-circle text-muted cursor-help" data-toggle="tooltip"
+                               data-placement="right" title="The name of your challenge"></i>
+                        </label>
+                        <input type="text" class="form-control chal-name" name="name" placeholder="Enter challenge name"
+                               value="{{ name }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="category">Category
+                            <i class="far fa-question-circle text-muted cursor-help" data-toggle="tooltip"
+                               data-placement="right" title="The category of your challenge"></i>
+                        </label>
+                        <input type="text" class="form-control chal-category" name="category"
+                               placeholder="Enter challenge category" value="{{ category }}">
+                    </div>
                     <div class="form-group">
                         <label for="naumachia_name">Naumachia Name
                             <i class="fa fa-question-circle text-muted" data-toggle="tooltip" data-placement="right" title="The name of the challenge within Naumachia"></i>
                         </label>
-                        <input type="text" class="form-control chal-naumachia-name" name="naumachia_name" placeholder="Enter Naumachia name">
+                        <input type="text" class="form-control chal-naumachia-name" name="naumachia_name"
+                            placeholder="Enter Naumachia name" value="{{ naumachia_name }}" required>
                     </div>
 
 					<ul class="nav nav-tabs" role="tablist" id="desc-edit">
