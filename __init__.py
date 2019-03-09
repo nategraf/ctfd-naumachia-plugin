@@ -247,18 +247,19 @@ def load(app):
             logger.info("[403] User {0} requested config for challenge {1}: Not authorized".format(session.get('username', '<not authed>'), chalid))
             abort(403)
 
+        username = get_current_user().name
         chal = NaumachiaChallengeModel.query.filter_by(id=chalid).first_or_404()
-        if chal.hidden:
-            logger.info("[404] User {0} requested config for hidden challenge {1}".format(session['username'], chal.name))
+        if chal.state == 'hidden':
+            logger.info("[404] User {0} requested config for hidden challenge {1}".format(username, chal.name))
             abort(404)
 
-        escaped_username = quote(session['username'])
+        escaped_username = quote(username)
         escaped_chalname = quote(chal.naumachia_name, safe='')
         host = "{0}:{1}".format(registrar_host, registrar_port)
 
         try:
             resp = send_config(host, escaped_chalname, escaped_username)
-            logger.info("[200] User {0} requested config for challenge {1}".format(session['username'], chal.name))
+            logger.info("[200] User {0} requested config for challenge {1}".format(username, chal.name))
             return resp
         except HTTPError as err:
             if err.code != 404:
@@ -272,7 +273,7 @@ def load(app):
             urlopen(url, timeout=registrar_timeout)
 
             resp = send_config(host, escaped_chalname, escaped_username)
-            logger.info("[200] User {0} requested new config for challenge {1}".format(session['username'], chal.name))
+            logger.info("[200] User {0} requested new config for challenge {1}".format(username, chal.name))
             return resp
         except HTTPError:
             logger.info("[500] Config creation failed for challenge {0}".format(chal.name))
