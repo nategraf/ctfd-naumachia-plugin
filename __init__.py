@@ -1,14 +1,18 @@
-from CTFd.plugins import register_plugin_assets_directory
-from CTFd.plugins.keys import get_key_class
-from CTFd.plugins.challenges import BaseChallenge, CHALLENGE_CLASSES
-from CTFd.models import db, Solves, WrongKeys, Keys, Challenges, Files, Tags, Hints
 from CTFd import utils
-from io import BytesIO
+from CTFd.models import db, Solves, Fails, Flags, Challenges, ChallengeFiles, Tags, Hints
+from CTFd.plugins import register_plugin_assets_directory
+from CTFd.plugins.challenges import BaseChallenge, CHALLENGE_CLASSES
+from CTFd.plugins.flags import get_flag_class
+from CTFd.utils.uploads import delete_file
+from CTFd.utils.user import get_ip, is_admin, authed, get_current_user
+from CTFd.utils.config.visibility import challenges_visible
 from flask import session, abort, send_file
-from .config import registrar_host, registrar_port
+from io import BytesIO
 import json
 import logging
 import os
+
+from .config import registrar_host, registrar_port
 
 try:
     from urllib.parse import quote
@@ -27,26 +31,27 @@ class NaumachiaChallengeModel(Challenges):
     id = db.Column(None, db.ForeignKey('challenges.id'), primary_key=True)
     naumachia_name = db.Column(db.String(80))
 
-    def __init__(self, name, description, value, category, naumachia_name, type='naumachia'):
+    def __init__(self, name, description, value, category, state, naumachia_name, type='naumachia'):
         self.name = name
         self.description = description
         self.value = value
         self.category = category
         self.type = type
+        self.state = state
         self.naumachia_name = naumachia_name
 
 class NaumachiaChallenge(BaseChallenge):
     id = "naumachia"  # Unique identifier used to register challenges
     name = "naumachia"  # Name of a challenge type
     templates = {  # Nunjucks templates used for each aspect of challenge editing & viewing
-        'create': '/plugins/{0}/assets/naumachia-challenge-create.njk'.format(plugin_dirname),
-        'update': '/plugins/{0}/assets/naumachia-challenge-update.njk'.format(plugin_dirname),
-        'modal': '/plugins/{0}/assets/naumachia-challenge-modal.njk'.format(plugin_dirname),
+        'create': '/plugins/{0}/assets/create.html'.format(plugin_dirname),
+        'update': '/plugins/{0}/assets/update.html'.format(plugin_dirname),
+        'view': '/plugins/{0}/assets/view.html'.format(plugin_dirname),
     }
     scripts = {  # Scripts that are loaded when a template is loaded
-        'create': '/plugins/{0}/assets/naumachia-challenge-create.js'.format(plugin_dirname),
-        'update': '/plugins/{0}/assets/naumachia-challenge-update.js'.format(plugin_dirname),
-        'modal': '/plugins/{0}/assets/naumachia-challenge-modal.js'.format(plugin_dirname),
+        'create': '/plugins/{0}/assets/create.js'.format(plugin_dirname),
+        'update': '/plugins/{0}/assets/update.js'.format(plugin_dirname),
+        'view': '/plugins/{0}/assets/view.js'.format(plugin_dirname),
     }
 
     @staticmethod
@@ -57,41 +62,14 @@ class NaumachiaChallenge(BaseChallenge):
         :param request:
         :return:
         """
+        data = request.form or request.get_json()
 
-        # Create challenge
-        chal = NaumachiaChallengeModel(
-            name=request.form['name'],
-            description=request.form['description'],
-            value=request.form['value'],
-            category=request.form['category'],
-            type=request.form['chaltype'],
-            naumachia_name=request.form['naumachia_name']
-        )
+        challenge = NaumachiaChallengeModel(**data)
 
-        if 'hidden' in request.form:
-            chal.hidden = True
-        else:
-            chal.hidden = False
-
-        max_attempts = request.form.get('max_attempts')
-        if max_attempts and max_attempts.isdigit():
-            chal.max_attempts = int(max_attempts)
-
-        db.session.add(chal)
+        db.session.add(challenge)
         db.session.commit()
 
-        flag = Keys(chal.id, request.form['key'], request.form['key_type[0]'])
-        if request.form.get('keydata'):
-            flag.data = request.form.get('keydata')
-        db.session.add(flag)
-
-        db.session.commit()
-
-        files = request.files.getlist('files[]')
-        for f in files:
-            utils.upload_file(file=f, chalid=chal.id)
-
-        db.session.commit()
+        return challenge
 
     @staticmethod
     def read(challenge):
@@ -108,7 +86,7 @@ class NaumachiaChallenge(BaseChallenge):
             'description': challenge.description,
             'category': challenge.category,
             'naumachia_name': challenge.naumachia_name,
-            'hidden': challenge.hidden,
+            'state': challenge.state,
             'max_attempts': challenge.max_attempts,
             'type': challenge.type,
             'type_data': {
@@ -118,7 +96,7 @@ class NaumachiaChallenge(BaseChallenge):
                 'scripts': NaumachiaChallenge.scripts,
             }
         }
-        return challenge, data
+        return data
 
     @staticmethod
     def update(challenge, request):
@@ -130,15 +108,12 @@ class NaumachiaChallenge(BaseChallenge):
         :param request:
         :return:
         """
-        challenge.name = request.form['name']
-        challenge.description = request.form['description']
-        challenge.value = int(request.form.get('value', 0)) if request.form.get('value', 0) else 0
-        challenge.max_attempts = int(request.form.get('max_attempts', 0)) if request.form.get('max_attempts', 0) else 0
-        challenge.category = request.form['category']
-        challenge.naumachia_name = request.form['naumachia_name']
-        challenge.hidden = 'hidden' in request.form
+        data = request.form or request.get_json()
+        for attr, value in data.items():
+            setattr(challenge, attr, value)
+
         db.session.commit()
-        db.session.close()
+        return challenge
 
     @staticmethod
     def delete(challenge):
@@ -148,39 +123,40 @@ class NaumachiaChallenge(BaseChallenge):
         :param challenge:
         :return:
         """
-        WrongKeys.query.filter_by(chalid=challenge.id).delete()
-        Solves.query.filter_by(chalid=challenge.id).delete()
-        Keys.query.filter_by(chal=challenge.id).delete()
-        files = Files.query.filter_by(chal=challenge.id).all()
+        Fails.query.filter_by(challenge_id=challenge.id).delete()
+        Solves.query.filter_by(challenge_id=challenge.id).delete()
+        Flags.query.filter_by(challenge_id=challenge.id).delete()
+        files = ChallengeFiles.query.filter_by(challenge_id=challenge.id).all()
         for f in files:
-            utils.delete_file(f.id)
-        Files.query.filter_by(chal=challenge.id).delete()
-        Tags.query.filter_by(chal=challenge.id).delete()
-        Hints.query.filter_by(chal=challenge.id).delete()
+            delete_file(f.id)
+        ChallengeFiles.query.filter_by(challenge_id=challenge.id).delete()
+        Tags.query.filter_by(challenge_id=challenge.id).delete()
+        Hints.query.filter_by(challenge_id=challenge.id).delete()
         NaumachiaChallengeModel.query.filter_by(id=challenge.id).delete()
         Challenges.query.filter_by(id=challenge.id).delete()
         db.session.commit()
 
     @staticmethod
-    def attempt(chal, request):
+    def attempt(challenge, request):
         """
         This method is used to check whether a given input is right or wrong. It does not make any changes and should
         return a boolean for correctness and a string to be shown to the user. It is also in charge of parsing the
         user's input from the request itself.
 
-        :param chal: The Challenge object from the database
+        :param challenge: The Challenge object from the database
         :param request: The request the user submitted
         :return: (boolean, string)
         """
-        provided_key = request.form['key'].strip()
-        chal_keys = Keys.query.filter_by(chal=chal.id).all()
-        for chal_key in chal_keys:
-            if get_key_class(chal_key.type).compare(chal_key, provided_key):
+        data = request.form or request.get_json()
+        submission = data['submission'].strip()
+        flags = Flags.query.filter_by(challenge_id=challenge.id).all()
+        for flag in flags:
+            if get_flag_class(flag.type).compare(flag, submission):
                 return True, 'Correct'
         return False, 'Incorrect'
 
     @staticmethod
-    def solve(team, chal, request):
+    def solve(user, team, challenge, request):
         """
         This method is used to insert Solves into the database in order to mark a challenge as solved.
 
@@ -189,34 +165,48 @@ class NaumachiaChallenge(BaseChallenge):
         :param request: The request the user submitted
         :return:
         """
-        provided_key = request.form['key'].strip()
-        solve = Solves(teamid=team.id, chalid=chal.id, ip=utils.get_ip(req=request), flag=provided_key)
+        data = request.form or request.get_json()
+        submission = data['submission'].strip()
+        solve = Solves(
+            user_id=user.id,
+            team_id=team.id if team else None,
+            challenge_id=challenge.id,
+            ip=get_ip(req=request),
+            provided=submission
+        )
         db.session.add(solve)
         db.session.commit()
         db.session.close()
 
     @staticmethod
-    def fail(team, chal, request):
+    def fail(user, team, challenge, request):
         """
-        This method is used to insert WrongKeys into the database in order to mark an answer incorrect.
+        This method is used to insert Fails into the database in order to mark an answer incorrect.
 
         :param team: The Team object from the database
         :param chal: The Challenge object from the database
         :param request: The request the user submitted
         :return:
         """
-        provided_key = request.form['key'].strip()
-        wrong = WrongKeys(teamid=team.id, chalid=chal.id, ip=utils.get_ip(request), flag=provided_key)
+        data = request.form or request.get_json()
+        submission = data['submission'].strip()
+        wrong = Fails(
+            user_id=user.id,
+            team_id=team.id if team else None,
+            challenge_id=challenge.id,
+            ip=get_ip(request),
+            provided=submission
+        )
         db.session.add(wrong)
         db.session.commit()
         db.session.close()
 
 def user_can_get_config():
-    if utils.is_admin():
+    if is_admin():
         return True
-    if not utils.authed():
+    if not authed():
         return False
-    if not utils.user_can_view_challenges():
+    if not challenges_visible():
         return False
     return True
 
