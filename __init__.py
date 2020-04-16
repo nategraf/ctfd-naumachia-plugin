@@ -3,9 +3,10 @@ from CTFd.models import db, Solves, Fails, Flags, Challenges, ChallengeFiles, Ta
 from CTFd.plugins import register_plugin_assets_directory
 from CTFd.plugins.challenges import BaseChallenge, CHALLENGE_CLASSES
 from CTFd.plugins.flags import get_flag_class
-from CTFd.utils.uploads import delete_file
-from CTFd.utils.user import get_ip, is_admin, authed, get_current_user
+from CTFd.utils.config import is_teams_mode
 from CTFd.utils.config.visibility import challenges_visible
+from CTFd.utils.uploads import delete_file
+from CTFd.utils.user import get_ip, is_admin, authed, get_current_user, get_current_team
 from flask import session, abort, send_file
 from io import BytesIO
 import json
@@ -210,8 +211,8 @@ def user_can_get_config():
         return False
     return True
 
-def send_config(host, escaped_chalname, escaped_username):
-    url = "http://{0}/{1}/get?cn={2}".format(host, escaped_chalname, escaped_username)
+def send_config(host, escaped_chalname, escaped_clientname):
+    url = "http://{0}/{1}/get?cn={2}".format(host, escaped_chalname, escaped_clientname)
     logger.debug("Requesting: {0}".format(url))
     resp = urlopen(url, timeout=registrar_timeout)
     config = json.loads(resp.read().decode('utf-8')).encode('utf-8')
@@ -244,22 +245,26 @@ def load(app):
     @app.route('/naumachia/config/<int:chalid>', methods=['GET'])
     def registrar(chalid):
         if not user_can_get_config():
-            logger.info("[403] User {0} requested config for challenge {1}: Not authorized".format(session.get('username', '<not authed>'), chalid))
+            logger.info("[403] Client {0} requested config for challenge {1}: Not authorized".format(session.get('clientname', '<not authed>'), chalid))
             abort(403)
 
-        username = get_current_user().name
+        if is_teams_mode():
+            clientname = get_current_team().name
+        else:
+            clientname = get_current_user().name
+
         chal = NaumachiaChallengeModel.query.filter_by(id=chalid).first_or_404()
         if chal.state == 'hidden':
-            logger.info("[404] User {0} requested config for hidden challenge {1}".format(username, chal.name))
+            logger.info("[404] Client {0} requested config for hidden challenge {1}".format(clientname, chal.name))
             abort(404)
 
-        escaped_username = quote(username)
+        escaped_clientname = quote(clientname)
         escaped_chalname = quote(chal.naumachia_name, safe='')
         host = "{0}:{1}".format(registrar_host, registrar_port)
 
         try:
-            resp = send_config(host, escaped_chalname, escaped_username)
-            logger.info("[200] User {0} requested config for challenge {1}".format(username, chal.name))
+            resp = send_config(host, escaped_chalname, escaped_clientname)
+            logger.info("[200] Client {0} requested config for challenge {1}".format(clientname, chal.name))
             return resp
         except HTTPError as err:
             if err.code != 404:
@@ -268,15 +273,15 @@ def load(app):
 
         try:
             # The certs had not been generated yet. Generate them now
-            url = "http://{0}/{1}/add?cn={2}".format(host, escaped_chalname, escaped_username)
+            url = "http://{0}/{1}/add?cn={2}".format(host, escaped_chalname, escaped_clientname)
             logger.debug("Requesting: {0}".format(url))
             urlopen(url, timeout=registrar_timeout)
 
-            resp = send_config(host, escaped_chalname, escaped_username)
-            logger.info("[200] User {0} requested new config for challenge {1}".format(username, chal.name))
+            resp = send_config(host, escaped_chalname, escaped_clientname)
+            logger.info("[200] Client {0} requested new config for challenge {1}".format(clientname, chal.name))
             return resp
         except HTTPError:
             logger.info("[500] Config creation failed for challenge {0}".format(chal.name))
             raise
-    
+
     register_plugin_assets_directory(app, base_path='/plugins/{0}/assets/'.format(plugin_dirname))
