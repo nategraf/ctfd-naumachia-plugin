@@ -227,7 +227,7 @@ def load(app):
     CHALLENGE_CLASSES['naumachia'] = NaumachiaChallenge
 
     # Intitialize logging.
-    logger.setLevel(logging.INFO)
+    logger.setLevel(app.config.get('LOG_LEVEL', "INFO"))
 
     log_dir = app.config.get('LOG_FOLDER', os.path.join(os.path.dirname(__file__), 'logs'))
     if not os.path.exists(log_dir):
