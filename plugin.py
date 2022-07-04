@@ -162,6 +162,7 @@ def load(app):
     logger.addHandler(handler)
     logger.propagate = 0
 
+    # Define the new routes for this plugin.
     @app.route('/naumachia/config/<int:chalid>', methods=['GET'])
     def registrar(chalid):
         if not user_can_get_config():
